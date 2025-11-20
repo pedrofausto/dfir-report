@@ -16,26 +16,24 @@ export const generateReportModification = async (
   userPrompt: string
 ): Promise<string> => {
   
-  const model = "gemini-2.5-flash";
+  // Use Flash Lite for low latency as requested
+  const model = "gemini-2.5-flash-lite";
   
   const systemInstruction = `
     You are an advanced MCP (Model Context Protocol) Agent specialized in DFIR Report generation and HTML Manipulation.
     
-    Your primary tool is "edit_html". 
+    OBJECTIVE:
+    Modify the provided HTML based on the USER_REQUEST while keeping the rest of the document EXACTLY as it is.
     
-    CONTEXT:
-    You have the current HTML source code of a Digital Forensics Incident Report.
-    The user will ask you to modify data, fix typos, change severity levels, or add new sections.
+    CRITICAL RULES:
+    1. **FULL OUTPUT REQUIRED**: You must return the COMPLETE HTML document, from <!DOCTYPE html> to </html>.
+    2. **NO PLACEHOLDERS**: Never use comments like "<!-- rest of code -->" or "...". Output every single line of the original code that wasn't modified.
+    3. **NO MARKDOWN**: Return raw string only. Do not wrap in \`\`\`html.
+    4. **PRESERVE STYLE**: Do not modify the <style> block unless explicitly asked.
+    5. **PRESERVE SCRIPTS**: Do not modify the <script> block at the end unless explicitly asked.
+    6. **TARGETED EDITS**: Only modify the specific HTML elements relevant to the user's request. Leave all other sections (Timeline, IOCs, Header) identical to the input.
     
-    RULES:
-    1. You MUST return the FULL, VALID HTML string as the result.
-    2. Do NOT return markdown code blocks (no \`\`\`html). Return raw string only.
-    3. PRESERVE the existing CSS in the <style> tags. Do not remove it.
-    4. PRESERVE the JavaScript logic at the bottom unless asked to change functionality.
-    5. If the user asks to change data (e.g. "Change severity to Critical"), find the HTML element and update the text/class accordingly.
-    6. If the user asks for analysis, you can insert a new card in the HTML with the analysis.
-    
-    CURRENT HTML LENGTH: ${currentHtml.length} characters.
+    FAILURE TO RETURN THE FULL CODE WILL BREAK THE SYSTEM.
   `;
 
   try {
@@ -48,7 +46,7 @@ export const generateReportModification = async (
       ],
       config: {
         systemInstruction: systemInstruction,
-        temperature: 0.2, // Low temperature for precision in code
+        temperature: 0.1, // Lower temperature for maximum precision
       }
     });
 

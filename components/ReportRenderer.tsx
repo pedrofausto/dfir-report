@@ -1,11 +1,25 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+
+export interface ReportRendererRef {
+  getBodyContent: () => string;
+  getHeadContent: () => string;
+}
 
 interface ReportRendererProps {
   htmlContent: string;
 }
 
-const ReportRenderer: React.FC<ReportRendererProps> = ({ htmlContent }) => {
+const ReportRenderer = forwardRef<ReportRendererRef, ReportRendererProps>(({ htmlContent }, ref) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    getBodyContent: () => {
+      return iframeRef.current?.contentDocument?.body?.innerHTML || '';
+    },
+    getHeadContent: () => {
+      return iframeRef.current?.contentDocument?.head?.innerHTML || '';
+    }
+  }));
 
   // Update iframe content when htmlContent changes
   useEffect(() => {
@@ -15,9 +29,6 @@ const ReportRenderer: React.FC<ReportRendererProps> = ({ htmlContent }) => {
         doc.open();
         doc.write(htmlContent);
         doc.close();
-        
-        // Optional: Inject a script to auto-resize height? 
-        // For now, we use flex-grow in the parent to fill space.
       }
     }
   }, [htmlContent]);
@@ -32,6 +43,6 @@ const ReportRenderer: React.FC<ReportRendererProps> = ({ htmlContent }) => {
       />
     </div>
   );
-};
+});
 
 export default ReportRenderer;
