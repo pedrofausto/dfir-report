@@ -1,0 +1,5 @@
+{
+  "name": "DFIR Cortex",
+  "description": "A secured, AI-powered DFIR report management system with RBAC and Natural Language HTML manipulation.",
+  "requestFramePermissions": []
+}
