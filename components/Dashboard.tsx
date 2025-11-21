@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { User, UserRole, ChatMessage } from '../types';
 import { INITIAL_REPORT_HTML } from '../constants';
 import { generateReportModification } from '../services/geminiService';
+import { sanitizeHtml, logSanitizationEvent } from '../services/sanitizationService';
 import ReportRenderer, { ReportRendererRef } from './ReportRenderer';
 import ChatInterface from './ChatInterface';
 import { LogOut, FileCode, ShieldCheck, LayoutDashboard, Download, Loader2, FileText } from 'lucide-react';
@@ -12,7 +13,9 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
-  const [htmlContent, setHtmlContent] = useState<string>(INITIAL_REPORT_HTML);
+  // Sanitize initial HTML content on component mount
+  const initialSanitized = sanitizeHtml(INITIAL_REPORT_HTML);
+  const [htmlContent, setHtmlContent] = useState<string>(initialSanitized.sanitized);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -34,9 +37,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     try {
       // Call the "MCP" service (Gemini)
       const newHtml = await generateReportModification(htmlContent, text);
-      
-      setHtmlContent(newHtml);
-      
+
+      // Sanitize AI-generated HTML to prevent XSS attacks
+      const sanitizationResult = sanitizeHtml(newHtml);
+
+      // Log security event if dangerous content was removed
+      logSanitizationEvent('Dashboard.tsx', sanitizationResult);
+
+      // Set only sanitized HTML content
+      setHtmlContent(sanitizationResult.sanitized);
+
       const responseMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'model',

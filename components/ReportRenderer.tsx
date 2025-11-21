@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import { sanitizeHtml, logSanitizationEvent } from '../services/sanitizationService';
 
 export interface ReportRendererRef {
   getBodyContent: () => string;
@@ -26,8 +27,15 @@ const ReportRenderer = forwardRef<ReportRendererRef, ReportRendererProps>(({ htm
     if (iframeRef.current) {
       const doc = iframeRef.current.contentDocument;
       if (doc) {
+        // Sanitize HTML before writing to iframe to prevent XSS attacks
+        const sanitizationResult = sanitizeHtml(htmlContent);
+
+        // Log security event if dangerous content was removed
+        logSanitizationEvent('ReportRenderer.tsx', sanitizationResult);
+
+        // Write only sanitized HTML to iframe
         doc.open();
-        doc.write(htmlContent);
+        doc.write(sanitizationResult.sanitized);
         doc.close();
       }
     }
