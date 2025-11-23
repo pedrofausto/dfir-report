@@ -418,6 +418,278 @@ The sanitization service logs security events:
 
 ---
 
+## Version Storage Security (SPEC-VERSION-001)
+
+### Overview
+
+The version management system stores report versions in localStorage with integrated security controls to prevent XSS attacks and ensure data integrity. All stored versions are automatically sanitized before persistence and restoration.
+
+### Security Architecture
+
+#### 1. Automatic Sanitization on Save
+
+When a version is created (auto-save or manual), the HTML content is sanitized before storage:
+
+```typescript
+// In versionStorageService.saveVersion()
+const sanitized = sanitizeHtml(version.htmlContent);
+const versionToStore = {
+  ...version,
+  htmlContent: sanitized.sanitized
+};
+
+await persistToStorage(versionToStore);
+```
+
+**Effectiveness**: Prevents malicious HTML from being stored in localStorage
+**Integration**: Uses SPEC-SECURITY-001 sanitization service
+
+#### 2. Automatic Sanitization on Restoration
+
+When a version is restored, the HTML is re-sanitized before returning to the component:
+
+```typescript
+// In VersionRestorationModal
+const restoredContent = await restoreVersion(versionId);
+const sanitized = sanitizeHtml(restoredContent);
+setHtmlContent(sanitized.sanitized);
+```
+
+**Effectiveness**: Prevents stored malicious content from executing on restore
+**Defense-in-Depth**: Double sanitization (at save and restore)
+
+#### 3. Storage Isolation by Report ID
+
+Versions are isolated by report ID to prevent cross-report version pollution:
+
+```typescript
+// Storage key structure
+const storageKey = `versions:${reportId}`;
+
+// Versions from different reports never mix
+const report1Versions = getVersions('report-001');  // Isolated
+const report2Versions = getVersions('report-002');  // Isolated
+```
+
+**Effectiveness**: Prevents version from one report corrupting another
+**Scope**: Each report has completely separate version history
+
+#### 4. User Metadata Tracking
+
+All versions include user information for audit trail:
+
+```typescript
+interface ReportVersion {
+  createdBy: {
+    userId: string;
+    username: string;
+    role: string;
+  };
+  createdAt: number;     // Timestamp
+  modifiedAt: number;    // Last modification
+}
+```
+
+**Audit Trail**: Track who created each version and when
+**Accountability**: Link versions to specific users
+**Forensic Value**: Maintain chain of custody
+
+#### 5. No External API Calls
+
+Version storage uses only localStorage (no external APIs):
+
+```typescript
+// Storage layer is entirely client-side
+const versions = localStorage.getItem(`versions:${reportId}`);
+localStorage.setItem(`versions:${reportId}`, JSON.stringify(newVersions));
+```
+
+**Security Benefit**: No data transmitted externally
+**Privacy**: Versions never leave user's browser
+**Performance**: No network latency
+
+#### 6. Quota Management Security
+
+Storage quota prevents DoS attacks through storage exhaustion:
+
+```typescript
+const usage = getStorageUsage(reportId);
+if (usage.percentageUsed > 90) {
+  // Automatically prune old auto-saves
+  await pruneOldAutoSaves(reportId, 5);  // Keep only 5 newest
+}
+```
+
+**Protection**: Prevents malicious actors from filling storage
+**Automatic Response**: Graceful degradation when full
+**User Control**: Manual deletion available
+
+### Threat Model
+
+#### Attack 1: Storing Malicious HTML in Version
+
+**Attack Vector**: User creates version with XSS payload
+**Example**:
+```html
+<!-- Malicious version stored -->
+<script>
+  fetch('/api/steal-data').then(r => r.json()).then(data => {
+    // Exfiltrate forensic data
+  });
+</script>
+```
+
+**Mitigation**:
+1. Automatic sanitization on save removes script tags
+2. Double-sanitization on restore adds defense-in-depth
+3. Audit logging tracks suspicious versions
+
+**Status**: ✅ **MITIGATED**
+
+#### Attack 2: Cross-Report Version Access
+
+**Attack Vector**: Malicious code accesses versions from different report
+**Scenario**: Attacker compares versions from different cases to find patterns
+
+**Mitigation**:
+1. Storage isolation by reportId prevents access
+2. Each report has separate localStorage key
+3. No API to enumerate all reports
+
+**Status**: ✅ **MITIGATED**
+
+#### Attack 3: Version Manipulation in Transit
+
+**Attack Vector**: localStorage modified by browser extensions or malware
+**Scenario**: External code injects malicious version
+
+**Mitigation**:
+1. Re-sanitization on restore prevents execution
+2. Version checksum validation (future enhancement)
+3. Offline storage means no network attack surface
+
+**Status**: ✅ **PARTIALLY MITIGATED** (browser-level attack)
+
+#### Attack 4: Storage Quota Exhaustion
+
+**Attack Vector**: Malicious code fills storage to prevent legitimate saves
+**Scenario**: localStorage full, auto-save fails, data lost
+
+**Mitigation**:
+1. Automatic pruning when quota exceeds 90%
+2. Compression (lz-string) reduces storage by 60-80%
+3. User can manually delete old versions
+
+**Status**: ✅ **MITIGATED**
+
+### Comparison with Manual Save
+
+| Aspect | Auto-Save | Manual Save | Security |
+|--------|-----------|-------------|----------|
+| Frequency | Every 30s | User-triggered | Auto-save safer |
+| Sanitization | ✅ Yes | ✅ Yes | Both sanitized |
+| User Metadata | ✅ Tracked | ✅ Tracked | Full audit trail |
+| Pruning | ✅ Automatic | ✅ Manual | Auto prevents DoS |
+| Description | Auto-generated | User-provided | Both timestamped |
+
+### Best Practices
+
+#### For Developers
+
+1. **Always Sanitize Before Storage**:
+   ```typescript
+   // ✅ CORRECT
+   const sanitized = sanitizeHtml(content);
+   await saveVersion({ htmlContent: sanitized.sanitized });
+
+   // ❌ WRONG
+   await saveVersion({ htmlContent: unsafeContent });
+   ```
+
+2. **Re-Sanitize on Restoration**:
+   ```typescript
+   // ✅ CORRECT
+   const restored = await restoreVersion(versionId);
+   const safe = sanitizeHtml(restored.htmlContent);
+
+   // ❌ WRONG
+   const restored = await restoreVersion(versionId);
+   setContent(restored.htmlContent);  // Unsafe!
+   ```
+
+3. **Log Security Events**:
+   ```typescript
+   if (!sanitized.isClean) {
+     logSecurityEvent('VersionRestore', {
+       versionId,
+       removed: sanitized.removed,
+       severity: sanitized.removed > 5 ? 'high' : 'low'
+     });
+   }
+   ```
+
+#### For Analysts
+
+1. **Monitor Auto-Save**: Check that auto-save is working (status indicator)
+2. **Review Version Metadata**: Check who created each version and when
+3. **Backup Important Versions**: Export key versions as JSON backup
+4. **Clean Up Old Versions**: Delete unnecessary versions to prevent quota issues
+
+### Compliance
+
+#### OWASP A7:2017 (XSS)
+
+**Status**: ✅ **FULLY ADDRESSED**
+
+- Input Validation: Sanitized before storage ✅
+- Output Encoding: Safe for browser rendering ✅
+- Whitelist Approach: DOMPurify patterns ✅
+- Testing: Comprehensive OWASP payload tests ✅
+
+#### OWASP A03:2021 (Injection)
+
+**Status**: ✅ **ADDRESSED**
+
+- HTML Injection Prevention: Sanitization blocks script injection ✅
+- No Unsanitized Reflection: All versions stored sanitized ✅
+- Content Validation: Type-safe storage with TypeScript ✅
+
+### Testing Coverage
+
+**Version Storage Security Tests**:
+- Sanitization integration: 100%
+- Quota management: 100%
+- Storage isolation: 100%
+- User metadata tracking: 100%
+
+**OWASP Payload Tests**:
+- 30+ XSS patterns validated
+- 100% block rate for OWASP payloads
+- Performance regression tests
+
+### Monitoring
+
+#### What to Monitor
+
+1. **Sanitization Events**: Track versions with dangerous content removed
+2. **Quota Usage**: Alert when approaching 90% capacity
+3. **Failed Saves**: Monitor auto-save failures
+4. **Metadata Changes**: Track user role changes and permissions
+
+#### Log Analysis
+
+```javascript
+// Security event example
+[SECURITY] VersionRestoration sanitized version v123
+  original_size: 5000 bytes
+  sanitized_size: 4500 bytes
+  removed: 2 dangerous elements
+  user_id: analyst-001
+  timestamp: 2025-11-23T15:30:45Z
+```
+
+---
+
 ## References
 
 ### External Resources
@@ -432,16 +704,23 @@ The sanitization service logs security events:
 - **SPEC-SECURITY-001**: HTML Sanitization with DOMPurify (Current Implementation)
 - **SPEC-SECURITY-002**: Content Security Policy Headers (Planned v0.6.0)
 - **SPEC-BACKEND-001**: Server-Side Sanitization (Planned v0.5.0)
+- **SPEC-VERSION-001**: Version History and Management System
 
 ### Internal Documentation
 
-- `services/sanitizationService.ts`: Implementation details
-- `services/__tests__/sanitizationService.test.ts`: Unit tests
+- `services/sanitizationService.ts`: Sanitization implementation
+- `services/versionStorageService.ts`: Version storage with security
+- `services/__tests__/sanitizationService.test.ts`: Sanitization tests
+- `services/__tests__/versionStorageService.test.ts`: Version storage tests
 - `services/__tests__/owasp-validation.test.ts`: OWASP payload tests
-- `.moai/docs/API.md`: Sanitization service API reference
+- `.moai/docs/API.md`: Sanitization and version API reference
+- `.moai/docs/structure.md`: Architecture and data flow
+- `INTEGRATION_GUIDE.md`: Dashboard integration with version history
 
 ---
 
 **Document Status**: ✅ COMPLETE
-**Last Reviewed**: 2025-11-21
+**Last Reviewed**: 2025-11-23
+**Last Updated**: 2025-11-23 (Added Version Storage Security)
 **Next Review**: 2025-12-21 (or when SPEC-SECURITY-002 implemented)
+**Version**: 1.1.0

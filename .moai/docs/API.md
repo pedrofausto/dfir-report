@@ -586,16 +586,341 @@ if (event.removed > 10) {
 
 ---
 
+## Version Management API Reference
+
+**Module**: `services/versionStorageService.ts`, `services/versionUtils.ts`
+**Version**: 1.0.0
+**Status**: Stable (SPEC-VERSION-001 Complete)
+**Last Updated**: 2025-11-23
+
+---
+
+## Overview
+
+The Version Management API provides complete version history tracking, storage, and restoration capabilities for forensic reports. It includes auto-save functionality, version comparison, and storage quota management.
+
+### Main Purpose
+
+- **Persistence**: Store multiple versions with automatic sanitization
+- **Comparison**: Detect and display changes between versions
+- **Restoration**: Restore previous versions with confirmation workflow
+- **Metadata**: Track forensic context and user information
+- **Performance**: Virtual scrolling for 1000+ versions
+
+### Quick Start
+
+```typescript
+import { useVersionHistory } from '../hooks/useVersionHistory';
+import { useAutoSave } from '../hooks/useAutoSave';
+
+// In Dashboard component
+const { versions, restoreVersion } = useVersionHistory('report-001');
+const { isSaving, lastAutoSaveTime } = useAutoSave(htmlContent, {
+  reportId: 'report-001',
+  user: { userId: 'user-1', username: 'analyst', role: 'investigator' }
+});
+
+// Show version history
+{versions.map(v => (
+  <div key={v.versionId}>
+    <span>v{v.versionNumber}: {v.description}</span>
+    <button onClick={() => restoreVersion(v.versionId)}>Restore</button>
+  </div>
+))}
+```
+
+---
+
+## VersionStorageService Functions
+
+### `saveVersion()`
+
+Saves a version with automatic HTML sanitization.
+
+```typescript
+async function saveVersion(
+  version: ReportVersion,
+  toast?: ToastFunction
+): Promise<void>
+```
+
+**Returns**: Promise resolves when saved
+
+**Example**:
+```typescript
+const versionStorageService = getVersionStorageService();
+await versionStorageService.saveVersion({
+  versionId: generateVersionId(),
+  reportId: 'report-001',
+  htmlContent: '<p>Report content</p>',
+  versionNumber: 1,
+  createdAt: Date.now(),
+  modifiedAt: Date.now(),
+  description: 'Initial draft',
+  isAutoSave: true,
+  createdBy: {
+    userId: 'user-001',
+    username: 'analyst',
+    role: 'investigator'
+  }
+});
+```
+
+---
+
+### `getAllVersions()`
+
+Retrieves all versions for a report sorted by timestamp.
+
+```typescript
+async function getAllVersions(reportId: string): Promise<ReportVersion[]>
+```
+
+**Returns**: Array of versions (newest first)
+
+**Example**:
+```typescript
+const versions = await versionStorageService.getAllVersions('report-001');
+console.log(`Found ${versions.length} versions`);
+```
+
+---
+
+### `getVersionById()`
+
+Retrieves a specific version by ID.
+
+```typescript
+async function getVersionById(
+  reportId: string,
+  versionId: string
+): Promise<ReportVersion | null>
+```
+
+**Returns**: Version or null if not found
+
+---
+
+### `deleteVersion()`
+
+Deletes a version from storage.
+
+```typescript
+async function deleteVersion(
+  reportId: string,
+  versionId: string
+): Promise<boolean>
+```
+
+---
+
+### `getStorageUsage()`
+
+Returns storage quota statistics.
+
+```typescript
+function getStorageUsage(reportId?: string): StorageUsage
+```
+
+**Returns**:
+```typescript
+{
+  bytesUsed: number,
+  bytesQuota: number,
+  percentageUsed: number
+}
+```
+
+---
+
+### `pruneOldAutoSaves()`
+
+Removes old auto-saves when quota approaches limit.
+
+```typescript
+async function pruneOldAutoSaves(
+  reportId: string,
+  keepCount: number = 5
+): Promise<number>
+```
+
+**Returns**: Number of versions deleted
+
+---
+
+## VersionUtils Functions
+
+### `calculateDiffStats()`
+
+Calculates line-by-line differences.
+
+```typescript
+function calculateDiffStats(
+  oldContent: string,
+  newContent: string
+): DiffStats
+```
+
+**Returns**:
+```typescript
+{
+  additions: number,
+  deletions: number,
+  modifications: number,
+  totalChanges: number
+}
+```
+
+---
+
+### `sortVersionsByTimestamp()`
+
+Sorts versions by creation time.
+
+```typescript
+function sortVersionsByTimestamp(
+  versions: ReportVersion[],
+  order: 'asc' | 'desc' = 'desc'
+): ReportVersion[]
+```
+
+---
+
+### `compareVersions()`
+
+Detailed comparison between two versions.
+
+```typescript
+function compareVersions(
+  v1: ReportVersion,
+  v2: ReportVersion
+): VersionComparison
+```
+
+**Returns**: Comparison with diff stats and metadata
+
+---
+
+## Hooks API
+
+### `useAutoSave()`
+
+```typescript
+const {
+  isSaving,
+  lastAutoSaveTime,
+  pauseAutoSave,
+  resumeAutoSave,
+  isAutoSavePaused,
+  manualSave
+} = useAutoSave(htmlContent, {
+  reportId: 'report-001',
+  user: { userId, username, role },
+  debounceMs: 3000,
+  autoSaveIntervalMs: 30000
+});
+```
+
+---
+
+### `useVersionHistory()`
+
+```typescript
+const {
+  versions,
+  isLoading,
+  error,
+  restoreVersion,
+  deleteVersion,
+  compareVersions,
+  getVersionById,
+  getLatestVersion,
+  refreshVersions
+} = useVersionHistory('report-001');
+```
+
+---
+
+## Type Definitions
+
+### ReportVersion
+
+```typescript
+interface ReportVersion {
+  versionId: string;
+  reportId: string;
+  htmlContent: string;
+  versionNumber: number;
+  createdAt: number;
+  modifiedAt: number;
+  description?: string;
+  isAutoSave: boolean;
+  createdBy: {
+    userId: string;
+    username: string;
+    role: string;
+  };
+  forensicContext?: ForensicContext;
+}
+```
+
+### DiffStats
+
+```typescript
+interface DiffStats {
+  additions: number;
+  deletions: number;
+  modifications: number;
+  totalChanges: number;
+}
+```
+
+### StorageUsage
+
+```typescript
+interface StorageUsage {
+  bytesUsed: number;
+  bytesQuota: number;
+  percentageUsed: number;
+}
+```
+
+---
+
+## Related Documentation
+
+### Implementation Details
+
+- **Storage**: `services/versionStorageService.ts`
+- **Utilities**: `services/versionUtils.ts`
+- **Hooks**: `hooks/useAutoSave.ts`, `hooks/useVersionHistory.ts`
+- **Components**: `components/VersionTimeline.tsx`, `components/VersionHistoryPanel.tsx`
+
+### Testing
+
+- **Service Tests**: `services/__tests__/versionStorageService.test.ts` (18 tests)
+- **Utility Tests**: `services/__tests__/versionUtils.test.ts` (29 tests)
+- **Hook Tests**: 40 tests total
+
+### SPEC Documents
+
+- **SPEC-VERSION-001**: Version History and Management System
+- **SPEC-SECURITY-001**: HTML Sanitization (integrated with version storage)
+
+---
+
 ## Support & Contact
 
 For questions or issues:
 - **Documentation**: See `.moai/docs/SECURITY.md` for threat model
-- **Code**: Review `services/sanitizationService.ts` for implementation
-- **Tests**: Check `services/__tests__/` for usage examples
-- **GitHub Issues**: Report bugs or security vulnerabilities
+- **Version Guide**: See `INTEGRATION_GUIDE.md` for integration steps
+- **Code**: Review service files for implementation
+- **Tests**: Check test files for usage examples
+- **GitHub Issues**: Report bugs or feature requests
 
 ---
 
 **Document Status**: ✅ COMPLETE
-**Last Updated**: 2025-11-21
+**Last Updated**: 2025-11-23
 **Maintained By**: @user
+**Related SPECs**: SPEC-VERSION-001, SPEC-SECURITY-001
