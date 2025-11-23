@@ -22,3 +22,73 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Claude and MoAI configuration (user-specific, root only)
+# Environment variables and deployment secrets
+.moai/*.tmp
+# Build artifacts
+.playwright-mcp
+.netlify/
+*~
+.idea/
+# Temporary files
+docs/out/
+.uv_cache
+.firebase/
+*.tmp
+*.temp
+# Backups
+# OS
+env/
+*.pyo
+.env/
+# Cache
+# MoAI reports (임시 보고서만 무시)
+# Next.js build output
+dist/
+# Virtual environment
+.moai-backups/
+logs/
+/CLAUDE.md
+.venv_issue43_py313
+*.bak
+.claude/.env.local*
+# MoAI dynamic content (로컬 프로젝트만 무시, but package templates are tracked)
+*.swo
+.claude/settings.local.*.json
+coverage.json
+.vscode/
+.moai/logs/
+# IDE
+.aws/
+.uv-cache
+*_backup_*/
+*.swp
+.mypy_cache
+.moai/temp/
+.moai/reports/*-draft.*
+*.backup
+*.pyc
+hooks_backup_*/
+node_modules/
+# Package templates (src/moai_adk/templates/) are tracked
+.venv/
+.coverage
+.claude/settings.local.json
+docs_backup_*/
+build/
+*.backup/
+venv/
+*-backup/
+docs/.next/
+*.egg
+Thumbs.db
+.pytest_cache/
+*.tsbuildinfo
+# Test coverage
+.moai/reports/*.tmp
+.env*
+.tscache/
+.vercel/
+.ruff_cache
+*.egg-info/
+__pycache__/
