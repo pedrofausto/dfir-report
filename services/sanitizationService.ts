@@ -1,3 +1,5 @@
+import dompurify from 'dompurify';
+
 /**
  * Configuration for HTML sanitization
  */
@@ -49,112 +51,95 @@ const DEFAULT_CONFIG: SanitizationConfig = {
 };
 
 /**
- * Regular expressions to detect and remove dangerous patterns
+ * Helper to convert our custom config to DOMPurify config
  */
-const DANGEROUS_PATTERNS = [
-  /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-  /on\w+\s*=\s*["'][^"']*["']/gi,
-  /on\w+\s*=\s*[^\s>]*/gi,
-  /javascript:/gi,
-  /vbscript:/gi,
-  /(expression\s*\()/gi,
-  /<iframe/gi,
-  /<object/gi,
-  /<embed/gi,
-  /<applet/gi,
-  /<meta/gi,
-  /<link/gi,
-  /<style[^>]*>[\s\S]*?<\/style>/gi,
-  /formaction\s*=/gi,
-  /onfocus\s*=/gi,
-  /onblur\s*=/gi,
-  /onchange\s*=/gi,
-  /onload\s*=/gi,
-  /onerror\s*=/gi,
-  /onmouseover\s*=/gi,
-  /onmouseout\s*=/gi,
-  /onclick\s*=/gi,
-  /ondblclick\s*=/gi,
-  /onkeydown\s*=/gi,
-  /onkeyup\s*=/gi,
-  /oninput\s*=/gi,
-  /onwheel\s*=/gi,
-  /onmousedown\s*=/gi,
-  /onmouseup\s*=/gi,
-  /onmousemove\s*=/gi,
-  /ondrag\s*=/gi,
-  /ondrop\s*=/gi,
-  /data:text\/html/gi,
-  /data:application\/javascript/gi
-];
+function mapConfigToDOMPurify(config: SanitizationConfig = DEFAULT_CONFIG): any {
+  // Always use the default config as a base to ensure essential tags are allowed
+  const effectiveTags = config.allowedTags || DEFAULT_CONFIG.allowedTags || [];
 
-/**
- * Check if HTML contains dangerous content
- */
-function hasDangerousContent(html: string): boolean {
-  return DANGEROUS_PATTERNS.some(pattern => pattern.test(html));
+  // Combine allowed attributes
+  const allowedAttrs: string[] = [];
+  const effectiveAttrs = config.allowedAttributes || DEFAULT_CONFIG.allowedAttributes || {};
+
+  // Collect all attributes into a single list as DOMPurify ALLOWED_ATTR is a string[]
+  Object.values(effectiveAttrs).forEach(attrs => {
+    attrs.forEach(attr => {
+      if (!allowedAttrs.includes(attr)) {
+        allowedAttrs.push(attr);
+      }
+    });
+  });
+
+  return {
+    ALLOWED_TAGS: effectiveTags,
+    ALLOWED_ATTR: allowedAttrs,
+    ALLOW_DATA_ATTR: false, // Disallow data-* attributes by default
+    ADD_ATTR: ['target'], // Ensure target is allowed for links
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'applet', 'meta', 'link', 'style'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'oninput', 'onchange'],
+    KEEP_CONTENT: true, // Keep content of removed tags
+    WHOLE_DOCUMENT: false, // We usually sanitize fragments
+  };
+}
+
+// Initialize DOMPurify instance
+let DOMPurify: any;
+
+function initDOMPurify() {
+    if (DOMPurify) return;
+
+    if (typeof dompurify === 'function') {
+        if (typeof window !== 'undefined') {
+            DOMPurify = dompurify(window);
+        } else {
+             // Fallback for tests if window is missing but dompurify factory exists
+             // (Should not happen in jsdom env)
+             DOMPurify = dompurify;
+        }
+    } else {
+        DOMPurify = dompurify;
+    }
+}
+
+// Track custom removals per call
+let customRemovedCount = 0;
+
+function setupHooks() {
+    if (!DOMPurify || DOMPurify._hooksSetup) return;
+
+    // Hook to block dangerous protocols in attributes
+    DOMPurify.addHook('uponSanitizeAttribute', (node: Element, data: any) => {
+        if (data.attrName && (data.attrName === 'src' || data.attrName === 'href' || data.attrName === 'action' || data.attrName === 'formaction')) {
+            const value = data.attrValue.toLowerCase().trim();
+            // Block dangerous protocols including data:
+            if (value.startsWith('data:') || value.startsWith('javascript:') || value.startsWith('vbscript:')) {
+                data.attrValue = '';
+                node.removeAttribute(data.attrName);
+                customRemovedCount++;
+            }
+        }
+    });
+
+    // Use uponSanitizeElement to catch tags that are about to be removed
+    // JSDOM/DOMPurify interaction seems fragile for 'beforeSanitizeElements' or it's not being hit for stripped tags?
+    // Let's try checking if the tag is valid but NOT allowed.
+    DOMPurify.addHook('uponSanitizeElement', (node: Element, data: any) => {
+        if (!node.tagName) return;
+        const tagName = node.tagName.toUpperCase();
+
+        // Check for forbidden tags.
+        // If the tag is forbidden, DOMPurify normally removes it.
+        // We want to count it.
+        if (['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'APPLET', 'META', 'LINK', 'STYLE'].includes(tagName)) {
+             customRemovedCount++;
+        }
+    });
+
+    DOMPurify._hooksSetup = true;
 }
 
 /**
- * Remove dangerous patterns from HTML
- */
-function removeDangerousPatterns(html: string): { cleaned: string; removed: number } {
-  let cleaned = html;
-  let removed = 0;
-
-  // Remove script tags and content
-  const scriptMatches = cleaned.match(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi);
-  if (scriptMatches) {
-    removed += scriptMatches.length;
-    cleaned = cleaned.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-  }
-
-  // Remove event handlers with quoted values
-  const eventMatches = cleaned.match(/on\w+\s*=\s*["'][^"']*["']/gi);
-  if (eventMatches) {
-    removed += eventMatches.length;
-    cleaned = cleaned.replace(/on\w+\s*=\s*["'][^"']*["']/gi, '');
-  }
-
-  // Remove inline event handlers without quotes
-  const eventMatches2 = cleaned.match(/on\w+\s*=\s*(?!["'])[^\s>]*/gi);
-  if (eventMatches2) {
-    removed += eventMatches2.length;
-    cleaned = cleaned.replace(/on\w+\s*=\s*(?!["'])[^\s>]*/gi, '');
-  }
-
-  // Remove dangerous protocols in URLs (javascript:, vbscript:, data:text/html, etc.)
-  // This matches the protocol prefix and removes it
-  const protocolMatches = cleaned.match(/(?:javascript|vbscript|data:text\/html|data:application\/javascript):/gi);
-  if (protocolMatches) {
-    removed += protocolMatches.length;
-    cleaned = cleaned.replace(/(?:javascript|vbscript|data:text\/html|data:application\/javascript):/gi, '');
-  }
-
-  // Remove data URLs in attributes more aggressively
-  // Remove href="data:text/html..." patterns
-  const dataUrlMatches = cleaned.match(/(?:href|src|action)\s*=\s*["']data:(?:text\/html|application\/javascript)[^"']*["']/gi);
-  if (dataUrlMatches) {
-    removed += dataUrlMatches.length;
-    cleaned = cleaned.replace(/(?:href|src|action)\s*=\s*["']data:(?:text\/html|application\/javascript)[^"']*["']/gi, '');
-  }
-
-  // Remove dangerous tags
-  const dangerousTagMatches = cleaned.match(/<(script|iframe|object|embed|applet|link|meta)\b[^>]*>/gi);
-  if (dangerousTagMatches) {
-    removed += dangerousTagMatches.length;
-    cleaned = cleaned.replace(/<(script|iframe|object|embed|applet|link|meta)\b[^>]*>/gi, '');
-  }
-
-  // Remove closing tags for dangerous elements
-  cleaned = cleaned.replace(/<\/(script|iframe|object|embed|applet|link|meta)>/gi, '');
-
-  return { cleaned, removed };
-}
-
-/**
- * Sanitize HTML content to prevent XSS attacks
- * Removes dangerous patterns and tags
+ * Sanitize HTML content to prevent XSS attacks using DOMPurify
  *
  * @param html - Raw HTML string to sanitize
  * @param config - Optional custom sanitization config
@@ -173,50 +158,63 @@ export function sanitizeHtml(
     };
   }
 
-  try {
-    // Store original HTML for comparison
-    const originalHtml = html;
+  initDOMPurify();
 
-    // Remove dangerous patterns
-    const { cleaned, removed } = removeDangerousPatterns(html);
+  if (!DOMPurify || typeof DOMPurify.sanitize !== 'function') {
+      console.error("DOMPurify not initialized properly");
+      return { sanitized: '', removed: 0, isClean: false };
+  }
+
+  try {
+    setupHooks();
+
+    // Reset counters
+    customRemovedCount = 0;
+
+    const domPurifyConfig = mapConfigToDOMPurify(config);
+
+    // Sanitize
+    const sanitized = DOMPurify.sanitize(html, {
+        ...domPurifyConfig,
+        WHOLE_DOCUMENT: false,
+        RETURN_DOM: false,
+        RETURN_DOM_FRAGMENT: false,
+    }) as string;
+
+    // DOMPurify.removed is an array of elements removed in the last call
+    // Filter out implicit body/head removals that happen in JSDOM environments for fragments
+    const domPurifyRemoved = DOMPurify.removed ? DOMPurify.removed.filter((item: any) => {
+        // If it's a body tag and we are sanitizing a fragment, ignore it
+        if (item.element && (item.element.tagName === 'BODY' || item.element.tagName === 'HEAD')) {
+             return false;
+        }
+        return true;
+    }) : [];
+
+    // Avoid double counting if DOMPurify actually reports these tags in .removed
+    // Ideally we'd check if `domPurifyRemoved` contains the elements we counted in `customRemovedCount`.
+    // But since `customRemovedCount` is just a number, we can't dedup easily.
+    // However, our observations showed DOMPurify.removed was empty for script tags.
+    // So simple addition is likely correct for now.
+
+    const domPurifyRemovedCount = domPurifyRemoved.length;
+
+    const totalRemoved = domPurifyRemovedCount + customRemovedCount;
 
     return {
-      sanitized: cleaned,
-      removed,
-      isClean: cleaned === originalHtml
+      sanitized,
+      removed: totalRemoved,
+      isClean: totalRemoved === 0
     };
   } catch (error) {
-    // If sanitization fails, return safe content
     console.error('Sanitization error:', error);
+    // Fail safe
     return {
       sanitized: '',
       removed: 0,
       isClean: false
     };
   }
-}
-
-/**
- * Flatten allowed attributes object into array format
- * @param allowedAttrs - Map of tag -> attributes
- * @returns Flattened array of "tag::attr" format
- */
-function flattenAllowedAttributes(
-  allowedAttrs: Record<string, string[]>
-): string[] {
-  const flattened: string[] = [];
-
-  for (const [tag, attrs] of Object.entries(allowedAttrs)) {
-    for (const attr of attrs) {
-      if (tag === '*') {
-        flattened.push(attr);
-      } else {
-        flattened.push(`${tag}::${attr}`);
-      }
-    }
-  }
-
-  return flattened;
 }
 
 /**
